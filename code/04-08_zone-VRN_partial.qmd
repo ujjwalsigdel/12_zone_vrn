@@ -142,33 +142,41 @@ Below, we will
 zone_yield %>%
   pivot_longer(cols = yield17_lbac:yield20_lbac) %>%
   ggplot(aes(x = value, fill = zone))+
-  geom_density(alpha = .6)
+  geom_density(alpha = .6) +
+  geom_vline(xintercept = vrn$yieldpotential)
 
 ```
 
 ```{r vrn calculation }
-vrn 
+vrn <- zone_yield %>% 
+       pivot_longer(cols = yield17_lbac:yield20_lbac) %>% 
+  group_by(zone) %>% 
+  summarise(yieldpotential = quantile(value, probs = 0.9)) %>% 
   # Defining yield potential  
 
     # Stop here, include these on plot above
 
   # Go on UGFertex and enter these yield potential values, assuming cotton as previous crop, irrigated, coastal plain soil. What total N did you get for zone high yield? What about zone low yield?
   
+  
   # We can also calculate those using the formula below, which is the formula used behind the scenes on UGFertex:
-  mutate(totalnrate_lbsac) %>% 
+  mutate(totalnrate_lbsac = 15 + yieldpotential*0.06) %>% 
   # Adjust total rate in 25% upwards for following cotton
-  mutate(totalnrate_adj_lbsac) %>%
+  mutate(totalnrate_adj_lbsac = totalnrate_lbsac*1.25) %>% # we doing this because production guide says to increase rate by 25% if cotton is following cotton. If there was soybean or peanuts, you reduce the rate. 
   # Calculate pre-plant rate
-  mutate(pp_totalnrate_adj_lbsac) %>%
+  mutate(pp_totalnrate_adj_lbsac = totalnrate_adj_lbsac*0.33) %>% #preplant we apply the same rate, here its 55 lb/ac
   # Calculate ~2/3 as portion to be applied in-season (Assuming a single pre-plant rate was applied to both zones)
-  mutate(is_totalnrate_adj_lbsac) %>%
+  mutate(is_totalnrate_adj_lbsac = totalnrate_adj_lbsac - 55) %>%
   # Calculate product rate when using UAN solution 28% N
   # UAN 28% has 3 lbs N per gallon of product (see chunk below)
-  mutate(uanrate_galac)
+  mutate(uanrate_galac = is_totalnrate_adj_lbsac/3,
+         uanrate_galac = round(uanrate_galac, 0))
 
 vrn
 
 ```
+From UGFertex, for high yield potential = 135 lbs/ac, low potential = 115 lbs/ac
+
 UAN is a liquid fertilizer, so how do we go from volume of solution to lbs of N?  
 
 > What information do we need?  
@@ -205,15 +213,23 @@ uan28_lbsNgal #~3 lbs N/gal of UAN28%
 How much UAN28% do we need to have delivered at the field to ensure enough product for application?  
 
 ```{r total volume of UAN per area}
-vrn 
+vrn %>% 
+  mutate(area_m2 = st_area(.)) %>% 
+  mutate(area_ac = as.numeric(area_m2/4047)) %>% 
 
   # Will ask for 20% more than recommended to have a bit extra 
-
+  mutate(uan_gal = (uanrate_galac*area_ac)*1.2) %>% 
+  summarise(totaluan_gal = sum(uan_gal))
+  
 ```
 
+ The farmer need to order 4235 gallons of UAN for the field for in-season application. 
+ 
 # Rx map  
 ```{r vrn vector}
-vrn_v 
+vrn_v <- zone_yield %>% 
+  left_join(vrn %>% 
+              st_drop_geometry())
 
 vrn_v
 ```
@@ -222,6 +238,8 @@ vrn_v
 vrn_v %>%
   mutate(uanrate_galac=factor(uanrate_galac)) %>%
   ggplot()+
+  geom_sf(aes(fill = uanrate_galac,
+              color = uanrate_galac))+
 
   
   labs(title="VRN Rx - UAN 28% rate",
@@ -241,14 +259,17 @@ We are going to export as **shapefile** as it is the most commonly accepted form
 Since we are exporting as shapefile, let's create a sub-folder inside `output` called `VRN` to have all the associated files saved together.  
 
 ```{r exporting}
-vrn_v 
+vrn_v %>% 
+  dplyr::select(zone, uanrate_galac) %>% 
+  write_sf("../output/VRN/vrn.shp",
+           delete_dsn = T)
 ```
 
 # Summary  
 In summary, today we:  
 - Understood where to look for information on crop and nutrient-specific recommendations  
 - Defined yield potential for each zone  
-- Calculated VRN in both lbs N/ac and gallons UAN38/ac  
+- Calculated VRN in both lbs N/ac and gallons UAN28/ac  
 - Exported VRN Rx as a shapefile  
 
 
